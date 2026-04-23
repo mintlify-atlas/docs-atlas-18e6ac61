@@ -1,0 +1,101 @@
+---
+title: "Enum reference — status and type values"
+description: "Reference for all Book My Show enums: SeatStatus, TicketStatus, ResponseStatus, SeatType, ScreenStatus, and Feature, with each value and its context."
+---
+
+The Book My Show API uses six enum types to represent discrete states and categories across the domain. This page documents every value and when it applies.
+
+<CardGroup cols={3}>
+  <Card title="SeatStatus" icon="chair" href="/api/enums#seatstatus">
+    Availability of a seat for a specific show
+  </Card>
+  <Card title="TicketStatus" icon="ticket" href="/api/enums#ticketstatus">
+    Lifecycle state of a booking
+  </Card>
+  <Card title="ResponseStatus" icon="circle-check" href="/api/enums#responsestatus">
+    Outcome of an API call
+  </Card>
+  <Card title="SeatType" icon="star" href="/api/enums#seattype">
+    Physical category of a seat
+  </Card>
+  <Card title="ScreenStatus" icon="film" href="/api/enums#screenstatus">
+    Operational state of a screen
+  </Card>
+  <Card title="Feature" icon="wand-magic-sparkles" href="/api/enums#feature">
+    Presentation technology flags
+  </Card>
+</CardGroup>
+
+---
+
+## SeatStatus
+
+Tracks the real-time availability of a `ShowSeat` — the combination of a specific `Seat` and a specific `Show`. Used when calling `POST /tickets/book` to verify that requested seats can be reserved.
+
+| Value | Description |
+|-------|-------------|
+| `AVAILABLE` | The seat is open and can be reserved. Only seats in this state can be included in a booking request. |
+| `BLOCKED` | The seat has been tentatively reserved (e.g. held during checkout) but payment has not been confirmed. Cannot be booked by another user. |
+| `BOOKED` | The seat has been paid for and is fully confirmed. Cannot be booked again. |
+
+---
+
+## TicketStatus
+
+Represents the lifecycle of a `Ticket` from creation through payment or cancellation.
+
+| Value | Description |
+|-------|-------------|
+| `UNPAID` | The ticket has just been created. Seats are reserved but payment has not yet been processed. This is the status assigned immediately after a successful `POST /tickets/book` call. |
+| `BOOKED` | Payment has been confirmed. The booking is complete. |
+| `CANCELLED` | The ticket was cancelled, either by the user or by the system (e.g. payment timeout). |
+
+---
+
+## ResponseStatus
+
+The top-level outcome field returned by every API endpoint. Returned in `BookTicketResponseDTO`.
+
+| Value | Description |
+|-------|-------------|
+| `SUCCESS` | The operation completed successfully. The `ticket` field in the response will be populated. |
+| `FAILURE` | The operation failed. The `ticket` field will be `null`. Check the request parameters and seat availability. |
+
+---
+
+## SeatType
+
+The physical category of a `Seat` within a screen. Seat type determines the price for a given show via the `SeatTypeShow` entity.
+
+| Value | Description |
+|-------|-------------|
+| `SILVER` | Standard economy seating, typically towards the front of the screen. Lowest price tier. |
+| `GOLD` | Mid-tier seating with better screen position. Moderately priced. |
+| `PLATINUM` | Premium seating at the center or rear with optimal viewing angle. Higher price tier. |
+| `RECLINER` | Fully reclining luxury seats. Highest price tier. |
+
+---
+
+## ScreenStatus
+
+The operational state of a `Screen`. Indicates whether the screen is available for scheduling shows.
+
+| Value | Description |
+|-------|-------------|
+| `OPERATIONAL` | The screen is functioning normally. |
+| `UNDER_MAINTENANCE` | The screen is temporarily unavailable due to maintenance work. |
+| `CLOSED` | The screen has been permanently or indefinitely closed. |
+
+---
+
+## Feature
+
+Presentation technology flags that can be attached to both a `Screen` (its permanent capabilities) and a `Show` (the features used for that specific screening). A show can only use features that the screen supports.
+
+| Value | Description |
+|-------|-------------|
+| `TWO_D` | Standard two-dimensional projection. |
+| `THREE_D` | Stereoscopic 3D projection requiring 3D glasses. |
+| `DOLBY_ATMOS` | Dolby Atmos spatial audio system with object-based surround sound. |
+| `DOLBY_VISION` | Dolby Vision high dynamic range laser projection. |
+| `IMAX` | IMAX large-format projection with enhanced aspect ratio and sound. |

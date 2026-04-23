@@ -1,0 +1,95 @@
+---
+title: 'Spring Boot layered architecture for ticket booking'
+description: 'How the Book My Show API is structured across controller, service, repository, and model layers, and how a booking request flows through each layer.'
+---
+
+The Book My Show ticket booking API is a Spring Boot application structured around a strict layered architecture. Each layer has a single responsibility: HTTP handling, business logic, data access, and domain representation are kept separate so that each concern can evolve independently. The entry point is `BmsBookTicketApplication`, annotated with `@SpringBootApplication`, which bootstraps the Spring context and starts the embedded server.
+
+## Layers at a glance
+
+<CardGroup cols={2}>
+  <Card title="Controller layer" icon="arrow-right-to-bracket">
+    `TicketController` receives HTTP requests, deserialises them into `BookTicketRequestDTO` objects, and delegates all processing to the service layer. It returns a `BookTicketResponseDTO` containing a `ResponseStatus` and the resulting `Ticket`.
+  </Card>
+  <Card title="Service layer" icon="gears">
+    `TicketService` is a Java interface that defines the booking contract: `bookTicket(List<Integer> showSeatIds, int userId)`. `TicketServiceImpl` provides the concrete implementation, iterating over each requested `ShowSeat` ID to validate availability before creating a ticket.
+  </Card>
+  <Card title="Repository layer" icon="database">
+    Spring Data JPA repository interfaces — `ShowSeatRepository`, `SeatsRepository`, `ShowRepository`, `TicketRepository`, and `UserRepository` — handle all data access. `ShowSeatRepositoryImpl` provides a custom `findSeat(Integer showSeatId)` implementation backed by JPA's `findById`.
+  </Card>
+  <Card title="Model layer" icon="table">
+    JPA entity classes — `User`, `City`, `Theatre`, `Screen`, `Seat`, `Show`, `ShowSeat`, `SeatTypeShow`, `Ticket`, and `Movie` — map directly to database tables. All entities extend `BaseModel`, which supplies the auto-generated `id` primary key via `@Id` and `@GeneratedValue(strategy = GenerationType.IDENTITY)`.
+  </Card>
+</CardGroup>
+
+## Layer interactions
+
+The diagram below shows the direction of dependencies between packages:
+
+```text
+HTTP client
+    │
+    ▼
+TicketController          (controllers/)
+    │  BookTicketRequestDTO / BookTicketResponseDTO
+    ▼
+TicketService             (services/)         ← interface
+    │
+    ▼
+TicketServiceImpl         (impl/)             ← implementation
+    │  showSeatIds, userId
+    ▼
+ShowSeatRepository        (repositories/)     ← interface
+    │
+    ▼
+ShowSeatRepositoryImpl    (repositories/impl/)
+    │  JPA findById
+    ▼
+H2 in-memory database     (jdbc:h2:mem:bms)
+```
+
+Dependencies flow strictly downward. The controller knows about DTOs and the service interface. The service implementation knows about repositories and models. Repositories know about models only. Models have no upward dependencies.
+
+## Request flow: booking a ticket
+
+<Steps>
+  <Step title="HTTP request arrives at TicketController">
+    A client sends a POST request with a JSON body. Spring deserialises it into a `BookTicketRequestDTO`, which carries a `List<Integer> showSeatIds` and an `int userId`.
+
+    ```java
+    public BookTicketResponseDTO bookTicket(BookTicketRequestDTO requestDTO)
+    ```
+  </Step>
+  <Step title="Controller delegates to TicketService">
+    `TicketController` unpacks the DTO and calls `TicketService.bookTicket(showSeatIds, userId)`. The controller holds a reference to the `TicketService` interface, not the implementation, keeping the two layers decoupled.
+  </Step>
+  <Step title="TicketServiceImpl iterates over requested seats">
+    `TicketServiceImpl.bookTicket` loops over every `showSeatId` in the list. For each ID it needs to verify the seat's current `SeatStatus` before proceeding.
+
+    ```java
+    for (Integer showSeat : showSeatIds) {
+        // seat availability check via ShowSeatRepository
+    }
+    ```
+  </Step>
+  <Step title="ShowSeatRepository fetches each ShowSeat">
+    `ShowSeatRepositoryImpl.findSeat(showSeatId)` delegates to JPA's `findById` to retrieve the `ShowSeat` entity. `ShowSeat` holds a reference to both the `Show` and the physical `Seat`, as well as a `SeatStatus` (`AVAILABLE`, `BOOKED`, or `BLOCKED`).
+  </Step>
+  <Step title="Ticket is created and returned">
+    Once all requested seats are validated, the service constructs a `Ticket` entity recording the `Show`, the list of `Seat` objects, the `User`, the `timeOfBooking`, and a `TicketStatus`. The controller wraps this in a `BookTicketResponseDTO` with a `ResponseStatus.SUCCESS` and returns it to the client.
+  </Step>
+</Steps>
+
+## DTOs and the API boundary
+
+Data Transfer Objects in the `dtos/` package define the shape of data crossing the HTTP boundary. They are distinct from entity classes so that internal model changes do not leak into the API surface.
+
+| Class | Direction | Fields |
+|---|---|---|
+| `BookTicketRequestDTO` | Inbound | `List<Integer> showSeatIds`, `int userId` |
+| `BookTicketResponseDTO` | Outbound | `ResponseStatus status`, `Ticket ticket` |
+| `ResponseStatus` | Outbound | Enum: `SUCCESS`, `FAILURE` |
+
+<Note>
+`TicketService` operates on domain objects (`List<Integer>` IDs and a `Ticket` return value). The translation between DTOs and domain objects is the responsibility of `TicketController`, keeping service logic free of HTTP concerns.
+</Note>

@@ -1,0 +1,78 @@
+---
+title: "Error responses and handling in the BMS Booking API"
+description: "Every error scenario the booking API can return, what each response looks like, and how to write client code that recovers gracefully."
+---
+
+The BMS Booking API uses a consistent response envelope for both success and failure cases. Every response from `POST /tickets/book` includes a `status` field set to either `SUCCESS` or `FAILURE`. When `status` is `FAILURE`, the response includes additional fields that describe what went wrong and, where applicable, which specific resources caused the problem.
+
+## Error scenarios
+
+| Scenario | Condition | Response |
+|---|---|---|
+| Seats unavailable | Any `showSeatId` maps to a `ShowSeat` with status other than `AVAILABLE` | `FAILURE` + list of unavailable seat IDs |
+| Invalid `userId` | The `userId` does not match any `User` record in the database | `FAILURE` + error message |
+| Invalid `showSeatIds` | One or more `showSeatId` values do not match any `ShowSeat` record | `FAILURE` + error message |
+| Partial failure | Even a single unavailable seat blocks the entire booking | `FAILURE` — no seats are reserved, no ticket is created |
+
+## ResponseStatus values
+
+The `status` field in every response is one of two enum values:
+
+| Value | Meaning |
+|---|---|
+| `SUCCESS` | All seats were available and have been reserved; a `Ticket` with `status: UNPAID` was created |
+| `FAILURE` | The booking was rejected; no seats were modified and no ticket was created |
+
+<Warning>
+  Partial bookings are never created. If you request five seats and one is unavailable, zero seats are reserved. The API does not book the four available seats and skip the fifth — it rejects the entire request. Always treat a `FAILURE` response as a complete no-op on the server side.
+</Warning>
+
+## Error response shape
+
+A failure response always has `status: "FAILURE"` and a `null` ticket. The `BookTicketResponseDTO` contains exactly two fields — `status` and `ticket` — so there is no additional error message or conflict list in the response body.
+
+```json
+{
+  "status": "FAILURE",
+  "ticket": null
+}
+```
+
+## Handling errors in your client
+
+The recommended pattern is to inspect `status` first and then prompt the user to select different seats:
+
+```java
+BookTicketResponseDTO response = ticketController.bookTicket(requestDTO);
+
+if (response.getStatus() == ResponseStatus.FAILURE) {
+    // Booking was rejected — no seats were modified
+    // Prompt the user to refresh availability and select new seats
+}
+```
+
+A typical seat-conflict exchange looks like this:
+
+```json Request
+{
+  "userId": 1,
+  "showSeatIds": [1, 2, 3]
+}
+```
+
+```json Response — seat 2 is BLOCKED by another user
+{
+  "status": "FAILURE",
+  "ticket": null
+}
+```
+
+<Tip>
+  When you receive `FAILURE`, do not retry the same `showSeatIds`. One or more of those seats is `BLOCKED` or `BOOKED`. Show the user fresh seat availability for the show, let them select a new combination, and submit a new request.
+</Tip>
+
+## Concurrent booking and why conflicts occur
+
+The `BLOCKED` status exists specifically to handle concurrent requests. When two users attempt to book overlapping seats at the same time, one request will complete the atomic reservation first — transitioning those seats to `BLOCKED` — and the second request will encounter them in a non-`AVAILABLE` state and receive a `FAILURE` response.
+
+This is by design. The API guarantees that no two bookings will ever share a seat; the trade-off is that a user may need to re-select seats if they are claimed between the time the user views the seating map and the time they submit their booking.

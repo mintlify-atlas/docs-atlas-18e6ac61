@@ -1,0 +1,69 @@
+---
+title: "Book My Show Ticket Booking API: what it does"
+description: "Learn what the Book My Show API does, the tech stack it runs on, and the key domain concepts you need before making your first booking request."
+---
+
+The Book My Show Ticket Booking API is a Spring Boot REST service that lets you book movie tickets programmatically. This page covers what the API does, the technology it is built on, and the key concepts a caller needs to understand before integrating.
+
+## What the API does
+
+The API accepts a booking request — a user ID and a list of show seat IDs — and attempts to reserve all of those seats atomically. If every seat is available, a `Ticket` is created and returned. If even one seat is unavailable, the entire request is rejected and no seats are reserved.
+
+<CardGroup cols={2}>
+  <Card title="Atomic seat reservation" icon="shield-check">
+    All requested seats are reserved together or none are. Partial bookings are never created.
+  </Card>
+  <Card title="Seat status lifecycle" icon="arrow-right-arrow-left">
+    Seats transition through `AVAILABLE → BLOCKED → BOOKED` as bookings progress.
+  </Card>
+  <Card title="Ticket tracking" icon="ticket">
+    Each booking produces a `Ticket` entity linked to the user, show, and reserved seats.
+  </Card>
+  <Card title="Zero-config local database" icon="database">
+    Uses an embedded H2 in-memory database — no external database setup required.
+  </Card>
+</CardGroup>
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Runtime | Java 17 |
+| Framework | Spring Boot 3.1.x |
+| Persistence | Spring Data JPA (Hibernate) |
+| Database | H2 in-memory |
+| Boilerplate reduction | Lombok |
+| Build tool | Maven 3.x |
+
+## Domain model
+
+The API is built around the following core entities:
+
+- **User** — the person making the booking
+- **Movie** — the film being screened
+- **Theatre / Screen** — the venue and auditorium
+- **Show** — a scheduled screening of a movie on a specific screen
+- **Seat / ShowSeat** — a physical seat and its per-show availability record
+- **Ticket** — the confirmed reservation linking a user to one or more show seats
+
+## Request and response shapes
+
+Every booking goes through a single endpoint. The request carries:
+
+- `userId` — the ID of the user making the booking
+- `showSeatIds` — a list of show seat IDs to reserve
+
+The response carries:
+
+- `status` — `SUCCESS` or `FAILURE`
+- `ticket` — the created `Ticket` object (present on success)
+
+## H2 in-memory database
+
+<Note>
+  The API uses an H2 in-memory database. All data — users, shows, seats, and tickets — is lost each time the server restarts. Seed data or test fixtures must be re-applied after every restart.
+</Note>
+
+## Next step
+
+Follow the [quickstart](/quickstart) to clone the repository, start the server, and make your first booking request.

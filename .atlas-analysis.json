@@ -1,0 +1,63 @@
+{
+  "projectType": "api-service",
+  "projectName": "Book My Show - Ticket Booking API",
+  "projectDescription": "A Spring Boot REST API for booking movie tickets, managing shows, seats, and users with transactional seat reservation and status tracking.",
+  "theme": "luma",
+  "primaryColor": "#E63946",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart"]
+          },
+          {
+            "group": "Architecture",
+            "pages": ["architecture/overview", "architecture/data-model"]
+          },
+          {
+            "group": "Guides",
+            "pages": ["guides/booking-flow", "guides/seat-management", "guides/error-handling"]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Tickets",
+            "pages": ["api/book-ticket"]
+          },
+          {
+            "group": "Data Types",
+            "pages": ["api/models", "api/enums"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Atomic seat reservation — all seats booked or none (all-or-nothing transaction)",
+    "Concurrent request safety for high-traffic ticket booking",
+    "Show seat status lifecycle: AVAILABLE → BLOCKED → BOOKED",
+    "Ticket status lifecycle: UN_PAID → PAID",
+    "H2 in-memory database for fast local development and testing",
+    "JPA-backed domain model with City, Theatre, Screen, Show, Seat, ShowSeat, and Ticket entities",
+    "Lombok-powered DTOs for clean request/response contracts",
+    "Spring Boot 3 with Java 17"
+  ],
+  "publicApiSurface": [
+    "POST /tickets/book — bookTicket(BookTicketRequestDTO) → BookTicketResponseDTO",
+    "TicketService.bookTicket(List<Integer> showSeatIds, int userId) throws Exception",
+    "ShowSeatRepository.findSeat(Integer showSeatId) → ShowSeat",
+    "BookTicketRequestDTO { int userId, List<Integer> showSeatIds }",
+    "BookTicketResponseDTO { ResponseStatus status, Ticket ticket }",
+    "ResponseStatus enum: SUCCESS | FAILURE",
+    "TicketStatus enum: BOOKED | CANCELLED | UNPAID",
+    "SeatStatus enum: AVAILABLE | BLOCKED | BOOKED"
+  ]
+}

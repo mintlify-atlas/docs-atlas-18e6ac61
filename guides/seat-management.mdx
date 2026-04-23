@@ -1,0 +1,100 @@
+---
+title: "Understanding seat status and availability in BMS"
+description: "How Seat and ShowSeat differ, how the AVAILABLE → BLOCKED → BOOKED lifecycle works, and how seat types and show features affect pricing."
+---
+
+The API separates the concept of a physical seat from the concept of a seat's availability for a particular show. Understanding this distinction is essential before building any booking or seat-selection UI.
+
+## Seat vs ShowSeat
+
+| Entity | What it represents | Key fields |
+|---|---|---|
+| `Seat` | A physical seat permanently installed in a `Screen` | `id`, `name`, `seatType`, `screen` |
+| `ShowSeat` | The availability of a specific `Seat` for a specific `Show` | `id`, `show`, `seat`, `status` |
+
+A `Seat` record is created once when a screen is configured. Every time a new `Show` is scheduled on that screen, a corresponding `ShowSeat` record is created for each seat in the screen. The `ShowSeat` tracks whether that seat is available to book for that particular screening.
+
+When you submit a booking request, you provide `showSeatIds` — the IDs of `ShowSeat` records, not raw `Seat` IDs. This ensures the availability check and the reservation are always scoped to the correct show.
+
+## Seat status lifecycle
+
+<AccordionGroup>
+  <Accordion title="AVAILABLE">
+    The seat can be selected and reserved. When a `ShowSeat` is created for a new show, its status is initialized to `AVAILABLE`.
+
+    A seat returns to `AVAILABLE` if a booking attempt fails at any point before the atomic reservation completes, or if a payment times out and the hold is released.
+  </Accordion>
+
+  <Accordion title="BLOCKED">
+    The seat has been claimed by an in-flight booking but payment has not yet been confirmed. `BLOCKED` seats are not available to other users.
+
+    The transition from `AVAILABLE` to `BLOCKED` happens atomically for all seats in a request at the moment the service creates the `Ticket` with `status: UNPAID`. A seat stays `BLOCKED` until payment succeeds (→ `BOOKED`) or the booking is cancelled (→ `AVAILABLE`).
+  </Accordion>
+
+  <Accordion title="BOOKED">
+    Payment has been confirmed. The seat is permanently reserved for this show. `BOOKED` is a terminal state — a seat cannot transition out of `BOOKED` under normal operation.
+
+    The corresponding `Ticket` moves to `TicketStatus.BOOKED` at the same time.
+  </Accordion>
+</AccordionGroup>
+
+### What happens on booking failure
+
+If any seat in a request is not `AVAILABLE`, the service rejects the entire request before writing anything. All seats remain in their current state — no status transitions occur. See [error handling](/guides/error-handling) for the full list of failure scenarios.
+
+## Seat types
+
+Each `Seat` is assigned a `SeatType` that describes its category within the screen. Seat types affect pricing and are used to segment the seating map for the user.
+
+<CardGroup cols={2}>
+  <Card title="SILVER" icon="circle">
+    Standard seats, typically in the front rows. Lowest price tier.
+  </Card>
+  <Card title="GOLD" icon="circle-half-stroke">
+    Mid-section seats with a better viewing angle. Mid-range price.
+  </Card>
+  <Card title="PLATINUM" icon="star">
+    Premium seats in the center or back section. Higher price tier.
+  </Card>
+  <Card title="RECLINER" icon="couch">
+    Reclining seats, usually in a dedicated premium section. Highest price tier.
+  </Card>
+</CardGroup>
+
+## Pricing per show: SeatTypeShow
+
+Seat prices are not fixed globally — they are set per `SeatType` per `Show` using the `SeatTypeShow` entity.
+
+| Field | Type | Description |
+|---|---|---|
+| `show` | `Show` | The show this pricing entry applies to |
+| `seatType` | `SeatType` | The seat category (`SILVER`, `GOLD`, etc.) |
+| `price` | `double` | The price in the local currency for this seat type at this show |
+
+This lets the system charge different amounts for the same seat category across different shows — for example, a premium show on opening night can have higher `PLATINUM` pricing than a matinee screening of the same film.
+
+## Screen and show metadata
+
+### ScreenStatus
+
+Screens can be in one of three operational states:
+
+| Value | Meaning |
+|---|---|
+| `OPERATIONAL` | The screen is active and shows can be scheduled |
+| `UNDER_MAINTENANCE` | Temporarily unavailable; no new bookings should be accepted |
+| `CLOSED` | Permanently or indefinitely out of service |
+
+### Show features
+
+A `Show` can have one or more `Feature` values that describe the audio and visual format of the screening:
+
+| Value | Format |
+|---|---|
+| `TWO_D` | Standard 2D projection |
+| `THREE_D` | Stereoscopic 3D |
+| `DOLBY_ATMOS` | Dolby Atmos surround sound |
+| `DOLBY_VISION` | Dolby Vision high dynamic range |
+| `IMAX` | IMAX large-format projection |
+
+Features are stored as a list on the `Show` entity, so a show can combine formats — for example, `["IMAX", "DOLBY_ATMOS"]`.

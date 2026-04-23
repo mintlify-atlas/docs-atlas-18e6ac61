@@ -1,0 +1,139 @@
+---
+title: "POST /tickets/book — Reserve seats and create a ticket"
+description: "POST /tickets/book reserves seats atomically. Accepts userId and showSeatIds, returns an UNPAID ticket on success, or FAILURE if any seat is unavailable."
+---
+
+Reserve one or more seats for a show by submitting a user ID and a list of ShowSeat IDs. If every requested seat is `AVAILABLE`, the API creates a `Ticket` with status `UNPAID` and returns it. If any seat is not available the entire request fails — no seats are reserved.
+
+## Endpoint
+
+```
+POST /tickets/book
+```
+
+## Request
+
+```bash
+POST /tickets/book
+Content-Type: application/json
+```
+
+### Body parameters
+
+<ParamField body="userId" type="integer" required>
+  The ID of the user making the booking. Must correspond to an existing `User` record.
+</ParamField>
+
+<ParamField body="showSeatIds" type="integer[]" required>
+  An array of `ShowSeat` IDs to reserve. All IDs must belong to the same show and must be in `AVAILABLE` status.
+</ParamField>
+
+## Response
+
+<ResponseField name="status" type="string" required>
+  Outcome of the booking attempt. One of `SUCCESS` or `FAILURE`.
+</ResponseField>
+
+<ResponseField name="ticket" type="object">
+  The created ticket. Present only when `status` is `SUCCESS`.
+
+  <Expandable title="ticket fields">
+    <ResponseField name="id" type="integer">
+      Auto-generated unique identifier for the ticket.
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Ticket lifecycle status. Always `UNPAID` immediately after creation. See [TicketStatus](/api/enums#ticketstatus).
+    </ResponseField>
+    <ResponseField name="timeOfBooking" type="string">
+      ISO 8601 timestamp of when the ticket was created.
+    </ResponseField>
+    <ResponseField name="show" type="object">
+      The show for which seats were reserved. Contains `id`, `startTime`, `endTime`, `features`, and a nested `screen` object.
+    </ResponseField>
+    <ResponseField name="seats" type="object[]">
+      List of `Seat` objects that were reserved. Each seat has an `id`, `name`, and `seatType`.
+    </ResponseField>
+    <ResponseField name="user" type="object">
+      The `User` who made the booking. Contains `id`, `name`, and `email`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<Warning>
+  All requested seats must be in `AVAILABLE` status. If even one seat is `BLOCKED` or `BOOKED`, the entire request fails and no seats are reserved.
+</Warning>
+
+## Examples
+
+### Request
+
+<RequestExample>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8080/tickets/book \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "userId": 42,
+    "showSeatIds": [101, 102, 103]
+  }'
+```
+
+</RequestExample>
+
+### Responses
+
+<ResponseExample>
+
+```json Success — 200
+{
+  "status": "SUCCESS",
+  "ticket": {
+    "id": 7,
+    "status": "UNPAID",
+    "timeOfBooking": "2026-04-23T14:35:00.000+00:00",
+    "show": {
+      "id": 5,
+      "startTime": "2026-04-23T18:00:00.000+00:00",
+      "endTime": "2026-04-23T20:30:00.000+00:00",
+      "features": ["DOLBY_ATMOS", "THREE_D"],
+      "screen": {
+        "id": 2,
+        "name": "Screen A",
+        "status": "OPERATIONAL"
+      }
+    },
+    "seats": [
+      { "id": 11, "name": "D4", "seatType": "GOLD" },
+      { "id": 12, "name": "D5", "seatType": "GOLD" },
+      { "id": 13, "name": "D6", "seatType": "GOLD" }
+    ],
+    "user": {
+      "id": 42,
+      "name": "Priya Sharma",
+      "email": "priya@example.com"
+    }
+  }
+}
+```
+
+```json Failure — 200
+{
+  "status": "FAILURE",
+  "ticket": null
+}
+```
+
+<Note>
+  The failure response contains only `status` and `ticket` (null). There are no additional error message or seat conflict list fields — the `BookTicketResponseDTO` shape is fixed.
+</Note>
+
+</ResponseExample>
+
+## Error conditions
+
+| Condition | `status` returned | Notes |
+|-----------|-------------------|-------|
+| One or more `showSeatIds` are `BLOCKED` or `BOOKED` | `FAILURE` | No seats are reserved. Refresh availability and retry with `AVAILABLE` seat IDs. |
+| `userId` does not exist | `FAILURE` | The user must exist in the database before booking. |
+| A `showSeatId` does not match any `ShowSeat` record | `FAILURE` | All IDs must reference valid `ShowSeat` rows. |

@@ -1,0 +1,181 @@
+---
+title: 'JPA entity model and database schema for ticket booking'
+description: 'A detailed reference for every JPA entity in the Book My Show API, their fields, relationships, and how they map to the H2 in-memory database schema.'
+---
+
+The Book My Show API represents its domain as a graph of JPA entities, all of which extend `BaseModel` to inherit a common auto-generated primary key. The entity graph covers the full chain from geographic location (city and theatre) down to individual seat allocations per show. Understanding how these entities relate to each other is essential for following the booking flow and extending the schema.
+
+## Database configuration
+
+The application uses an H2 in-memory database configured in `src/main/resources/application.properties`. The schema is created automatically by Hibernate on startup and dropped when the JVM exits.
+
+```properties application.properties
+spring.datasource.url=jdbc:h2:mem:bms
+spring.datasource.driverClassName=org.h2.Driver
+spring.datasource.username=sa
+spring.datasource.password=password
+spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
+```
+
+<Warning>
+Because the database is in-memory (`jdbc:h2:mem:bms`), all data is lost when the application stops. For persistent storage, replace the datasource URL with a file-based H2 path or a different database engine.
+</Warning>
+
+## BaseModel — shared primary key
+
+Every entity extends `BaseModel`, a `@MappedSuperclass` that is not itself persisted as a table. It provides one field inherited by all entities:
+
+| Field | Type | Annotation |
+|---|---|---|
+| `id` | `int` | `@Id`, `@GeneratedValue(strategy = GenerationType.IDENTITY)` |
+
+`IDENTITY` strategy means the database column is an auto-incrementing integer. Each concrete subclass table gets its own `id` sequence.
+
+## Entities
+
+<AccordionGroup>
+  <Accordion title="User">
+    Represents a registered customer who can book tickets.
+
+    | Field | Type | Notes |
+    |---|---|---|
+    | `id` | `int` | Inherited from `BaseModel` |
+    | `name` | `String` | Display name |
+    | `email` | `String` | Login identifier |
+    | `password` | `String` | Stored credential |
+
+    A `User` is referenced by `Ticket` to record who made the booking.
+  </Accordion>
+
+  <Accordion title="City">
+    The top-level geographic grouping. Theatres belong to a city.
+
+    | Field | Type | Notes |
+    |---|---|---|
+    | `id` | `int` | Inherited from `BaseModel` |
+    | `name` | `String` | City name |
+    | `theatres` | `List<Theatre>` | One-to-many: all theatres in this city |
+  </Accordion>
+
+  <Accordion title="Theatre">
+    A physical venue that contains one or more screens.
+
+    | Field | Type | Notes |
+    |---|---|---|
+    | `id` | `int` | Inherited from `BaseModel` |
+    | `name` | `String` | Theatre name |
+    | `address` | `String` | Street address |
+    | `screens` | `List<Screen>` | One-to-many: screens inside this theatre |
+    | `city` | `City` | Many-to-one: the city this theatre belongs to |
+  </Accordion>
+
+  <Accordion title="Screen">
+    A single auditorium within a theatre. A screen hosts shows and contains physical seats.
+
+    | Field | Type | Notes |
+    |---|---|---|
+    | `id` | `int` | Inherited from `BaseModel` |
+    | `name` | `String` | Screen identifier (e.g. "Screen 1") |
+    | `seats` | `List<Seat>` | One-to-many: all physical seats in this screen |
+    | `status` | `ScreenStatus` | Enum: `OPERATIONAL`, `UNDER_MAINTENANCE`, `CLOSED` |
+    | `features` | `List<Feature>` | Enum list: `TWO_D`, `THREE_D`, `DOLBY_ATMOS`, `DOLBY_VISION`, `IMAX` |
+    | `theatre` | `Theatre` | Many-to-one: the theatre this screen belongs to |
+  </Accordion>
+
+  <Accordion title="Seat">
+    A physical seat inside a screen. Seats exist independently of any particular show.
+
+    | Field | Type | Notes |
+    |---|---|---|
+    | `id` | `int` | Inherited from `BaseModel` |
+    | `name` | `String` | Seat label (e.g. "A1") |
+    | `seatType` | `SeatType` | Enum: `SILVER`, `GOLD`, `PLATINUM`, `RECLINER` |
+    | `screen` | `Screen` | Many-to-one: the screen this seat is in |
+  </Accordion>
+
+  <Accordion title="Show">
+    A scheduled screening in a specific screen. A show has a start time, an end time, and a list of supported presentation features.
+
+    | Field | Type | Notes |
+    |---|---|---|
+    | `id` | `int` | Inherited from `BaseModel` |
+    | `startTime` | `Date` | Screening start time |
+    | `endTime` | `Date` | Screening end time |
+    | `features` | `List<Feature>` | Presentation formats available for this show |
+    | `screen` | `Screen` | Many-to-one: the screen hosting this show |
+  </Accordion>
+
+  <Accordion title="ShowSeat — central to availability">
+    `ShowSeat` is the join entity between a `Show` and a physical `Seat`. It is created for every seat in the screen when a show is scheduled, and its `status` field tracks whether that seat is available, booked, or blocked.
+
+    | Field | Type | Notes |
+    |---|---|---|
+    | `id` | `int` | Inherited from `BaseModel` |
+    | `show` | `Show` | Many-to-one: the show this record belongs to |
+    | `seat` | `Seat` | Many-to-one: the physical seat |
+    | `status` | `SeatStatus` | Enum: `AVAILABLE`, `BOOKED`, `BLOCKED` |
+
+    <Note>
+    The booking flow passes `showSeatIds` — IDs of `ShowSeat` rows — to `TicketService.bookTicket`. `ShowSeatRepositoryImpl.findSeat(showSeatId)` looks up each row. The `status` field on `ShowSeat` is what the service checks to determine whether a seat can be reserved.
+    </Note>
+  </Accordion>
+
+  <Accordion title="SeatTypeShow">
+    Stores the price for a given seat type within a specific show. This allows different pricing for `SILVER`, `GOLD`, `PLATINUM`, and `RECLINER` seats across different shows.
+
+    | Field | Type | Notes |
+    |---|---|---|
+    | `id` | `int` | Inherited from `BaseModel` |
+    | `show` | `Show` | Many-to-one: the show this pricing applies to |
+    | `seatType` | `SeatType` | The seat category being priced |
+    | `price` | `double` | Price in the application's currency |
+  </Accordion>
+
+  <Accordion title="Ticket">
+    A confirmed booking record created after seats are successfully reserved. A single ticket can cover multiple seats in the same show.
+
+    | Field | Type | Notes |
+    |---|---|---|
+    | `id` | `int` | Inherited from `BaseModel` |
+    | `show` | `Show` | Many-to-one: the show being attended |
+    | `seats` | `List<Seat>` | One-to-many: the physical seats included in this booking |
+    | `timeOfBooking` | `Date` | Timestamp when the ticket was created |
+    | `user` | `User` | Many-to-one: the customer who booked |
+    | `status` | `TicketStatus` | Enum: `BOOKED`, `CANCELLED`, `UNPAID` |
+  </Accordion>
+
+  <Accordion title="Movie">
+    Represents a film. In the current schema `Movie` is a standalone entity and is not yet associated with `Show`.
+
+    | Field | Type | Notes |
+    |---|---|---|
+    | `id` | `int` | Inherited from `BaseModel` |
+    | `name` | `String` | Film title |
+    | `description` | `String` | Synopsis or summary |
+  </Accordion>
+</AccordionGroup>
+
+## Entity relationship summary
+
+The diagram below shows how entities relate to one another, reading from the broadest geographic grouping down to individual booking records:
+
+```text
+City
+ └── Theatre (many)
+      └── Screen (many)
+           ├── Seat (many)
+           │    └── ShowSeat ──┐
+           └── Show (many) ────┘
+                │    └── ShowSeat (one per seat per show) ← SeatStatus
+                └── SeatTypeShow (pricing per SeatType)
+
+Ticket
+ ├── Show
+ ├── List<Seat>
+ ├── User
+ └── TicketStatus
+
+Movie  (standalone, not yet linked to Show)
+```
+
+`ShowSeat` is the pivot of the booking system: every time a show is created, one `ShowSeat` row is generated for each `Seat` in the screen. The booking service reads and mutates these rows to manage seat availability.

@@ -1,0 +1,124 @@
+---
+title: "Booking flow: from seat selection to ticket creation"
+description: "A complete walkthrough of the ticket booking lifecycle — from submitting seat IDs to receiving a confirmed, payment-ready ticket via POST /tickets/book."
+---
+
+The booking flow moves a request through four distinct phases: submission, validation, atomic reservation, and payment. Understanding each phase helps you build reliable integrations and handle edge cases before they reach production.
+
+<Steps>
+  <Step title="Phase 1: Requesting seats">
+    Send a `POST /tickets/book` request with the `userId` of the person booking and a list of `showSeatIds` — the IDs of the specific `ShowSeat` records you want to reserve for a given show.
+
+    ```bash
+    POST /tickets/book
+    Content-Type: application/json
+    ```
+
+    ```json
+    {
+      "userId": 1,
+      "showSeatIds": [1, 2, 3]
+    }
+    ```
+
+    The `showSeatIds` values are IDs of `ShowSeat` records, not raw `Seat` IDs. A `ShowSeat` ties a physical seat to a specific show and carries the current availability status.
+  </Step>
+
+  <Step title="Phase 2: Seat validation">
+    The service loads each `ShowSeat` record by ID and checks its `SeatStatus`. Every seat in the list must have a status of `AVAILABLE` for the request to proceed.
+
+    If any seat is not `AVAILABLE` — whether it is `BLOCKED` by another in-flight booking or already `BOOKED` — the service immediately collects the IDs of all unavailable seats and returns a `FAILURE` response. No seats are modified.
+
+    The check is performed for all requested seats before any write occurs, so you always receive the full set of conflicting seat IDs rather than failing on the first one found.
+  </Step>
+
+  <Step title="Phase 3: Atomic reservation">
+    When every seat passes validation, the service transitions all of them from `AVAILABLE` to `BLOCKED` in a single atomic operation. Concurrently arriving requests that include any of the same seat IDs will find those seats in `BLOCKED` status and be rejected.
+
+    Immediately after the status transition, a `Ticket` record is created with:
+
+    - `status`: `UNPAID`
+    - `timeOfBooking`: the current server timestamp
+    - `show`: the show associated with the requested seats
+    - `seats`: the list of reserved `Seat` objects
+    - `user`: the user identified by `userId`
+
+    The `UNPAID` status signals that the seat hold is live but payment has not yet been collected.
+  </Step>
+
+  <Step title="Phase 4: Payment (expected flow)">
+    Payment processing is outside the scope of the current implementation, but the designed lifecycle is:
+
+    1. Your client receives the `Ticket` with `status: UNPAID`.
+    2. You initiate payment through your payment provider, passing the ticket ID as a reference.
+    3. On payment success, the seats advance from `BLOCKED` → `BOOKED` and the ticket advances from `UNPAID` → `PAID` (mapped to `TicketStatus.BOOKED` in the current enum).
+    4. On payment failure or timeout, seats should be released back to `AVAILABLE` and the ticket cancelled (`TicketStatus.CANCELLED`).
+
+    Until payment is confirmed, the seats remain `BLOCKED` and cannot be claimed by other users.
+  </Step>
+</Steps>
+
+## Request and response examples
+
+<Tabs>
+  <Tab title="Success">
+    All requested seats were `AVAILABLE`. The service reserved them and created a ticket.
+
+    **Request**
+
+    ```json
+    {
+      "userId": 1,
+      "showSeatIds": [1, 2, 3]
+    }
+    ```
+
+    **Response**
+
+    ```json
+    {
+      "status": "SUCCESS",
+      "ticket": {
+        "id": 42,
+        "status": "UNPAID",
+        "timeOfBooking": "2026-04-23T14:35:00.000+00:00",
+        "show": {
+          "id": 7,
+          "startTime": "2026-04-23T18:00:00.000+00:00",
+          "endTime": "2026-04-23T20:30:00.000+00:00"
+        },
+        "seats": [
+          { "id": 101, "name": "A1", "seatType": "GOLD" },
+          { "id": 102, "name": "A2", "seatType": "GOLD" },
+          { "id": 103, "name": "A3", "seatType": "GOLD" }
+        ],
+        "user": { "id": 1 }
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Failure">
+    At least one requested seat was not `AVAILABLE`. No seats were modified.
+
+    **Request**
+
+    ```json
+    {
+      "userId": 1,
+      "showSeatIds": [1, 2, 3]
+    }
+    ```
+
+    **Response**
+
+    ```json
+    {
+      "status": "FAILURE",
+      "ticket": null
+    }
+    ```
+
+    The `ticket` field is `null` on failure. No seats are modified. The user must select a different combination of available seats and resubmit.
+  </Tab>
+</Tabs>
